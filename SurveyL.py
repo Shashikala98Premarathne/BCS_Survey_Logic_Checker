@@ -138,6 +138,42 @@ SURVEY_RULES = {
     27: "System fields region, country, and survey_year must exist",
 }
 
+# -------------------------------------------------------------------
+# Country-specific brand availability (used in logic rules)
+# -------------------------------------------------------------------
+COUNTRY_BRANDS = {
+    "Thailand": {
+        38: "Volvo",
+        32: "Scania",
+        28: "UD Trucks",
+        15: "Hino",
+        19: "Isuzu",
+        27: "Fuso",
+        47: "Foton",
+        21: "FAW",
+    },
+    "Taiwan": {
+        38: "Volvo",
+        7:  "DAF",
+        25: "MAN",
+        26: "Mercedes Benz",
+        32: "Scania",
+        15: "Hino",
+        27: "Fuso",
+        58: "Sitrak",
+    },
+}
+
+def get_country_brands(df_row) -> set[int]:
+    """Return the set of brand codes valid for the respondent's country."""
+    country = str(df_row.get("country", "")).strip().title()
+    if country in COUNTRY_BRANDS:
+        return set(COUNTRY_BRANDS[country].keys())
+    # Default: if no country or unknown, include all to avoid false errors
+    all_codes = set().union(*[set(v.keys()) for v in COUNTRY_BRANDS.values()])
+    return all_codes
+
+# -------------------------------------------------------------------
 digest, detailed = [], []
 
 def is_blank(val) -> bool:
@@ -305,10 +341,11 @@ for col in [c for c in df.columns if c.startswith("familiarity_b")]:
         bad = df[col].isin([2,3,4,5]) & df[imp].isna()
         for i in df[bad].index: add_issue(12,f"{imp} missing where fam=2–5",i)
 
-# Rule 13 – Consideration grid: should only be answered for quota make brand
+# Rule 13 – Consideration grid: should only contain brands valid for respondent's country
 cons_cols = [c for c in df.columns if c.startswith("consideration_b")]
-if cons_cols and "quota_make" in df.columns:
+if cons_cols and "quota_make" in df.columns and "country" in df.columns:
     for i, row in df.iterrows():
+        valid_brands = get_country_brands(row)
         qmake = str(row["quota_make"]).strip()
         if qmake in {"nan", "None", "", "NaN"}:
             add_issue(13, "Missing quota_make", i)
@@ -318,6 +355,28 @@ if cons_cols and "quota_make" in df.columns:
         if quota_col not in cons_cols:
             add_issue(13, f"No consideration column found for quota_make={qmake}", i)
             continue
+
+        # Quota brand must have value (not blank)
+        if is_blank(row.get(quota_col)):
+            add_issue(13, f"Missing consideration for quota brand ({quota_col})", i)
+
+        # Check all other brand columns
+        for c in cons_cols:
+            m = re.search(r"_b(\d+)$", c)
+            if not m:
+                continue
+            bid = int(m.group(1))
+
+            # If brand not valid for this respondent’s country, must be blank
+            if bid not in valid_brands:
+                if not is_blank(row.get(c)):
+                    add_issue(13, f"{c} should be blank (brand not asked in {row.get('country')})", i)
+                continue
+
+            # If brand valid and not quota brand, must be blank
+            if str(bid) != qmake and not is_blank(row.get(c)):
+                add_issue(13, f"Non-quota brand {c} should be blank", i)
+
 
         # Quota brand must have a valid (non-blank) value
         if is_blank(row.get(quota_col)):
