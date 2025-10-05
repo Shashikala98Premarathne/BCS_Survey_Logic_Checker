@@ -140,6 +140,14 @@ SURVEY_RULES = {
 
 digest, detailed = [], []
 
+def is_blank(val) -> bool:
+    """Return True if cell value should be treated as blank/null."""
+    if pd.isna(val):
+        return True
+    sval = str(val).strip().lower()
+    return sval in {"", "nan", "na", "n/a", "null", "#null!", "none"}
+
+
 def add_issue(rule_id, msg, idx=None):
     digest.append((rule_id, msg))
     if idx is not None:
@@ -224,15 +232,15 @@ if last_purch_cols and "quota_make" in df.columns:
             add_issue(8, f"No column found for quota_make={qmake}", i)
             continue
 
-        # Check: quota brand cell must be filled
-        if pd.isna(row.get(quota_col)):
+        # Quota brand cell must be filled
+        if is_blank(row.get(quota_col)):
             add_issue(8, f"Missing last_purchase for quota brand ({quota_col})", i)
 
-        # Check: all other brand cells must be blank
-        other_cols = [c for c in last_purch_cols if c != quota_col]
-        for c in other_cols:
-            if pd.notna(row.get(c)):
+        # All other brand cells must be blank
+        for c in [col for col in last_purch_cols if col != quota_col]:
+            if not is_blank(row.get(c)):
                 add_issue(8, f"Non-quota brand {c} should be blank", i)
+
 
 
 # Rule 9 – last_workshop_visit grid: only quota brand should have a response
@@ -249,15 +257,13 @@ if workshop_cols and "quota_make" in df.columns:
             add_issue(9, f"No column found for quota_make={qmake}", i)
             continue
 
-        # Quota brand cell must be filled
-        if pd.isna(row.get(quota_col)):
+        if is_blank(row.get(quota_col)):
             add_issue(9, f"Missing last_workshop_visit for quota brand ({quota_col})", i)
 
-        # All other brands must be blank
-        other_cols = [c for c in workshop_cols if c != quota_col]
-        for c in other_cols:
-            if pd.notna(row.get(c)):
+        for c in [col for col in workshop_cols if col != quota_col]:
+            if not is_blank(row.get(c)):
                 add_issue(9, f"Non-quota brand {c} should be blank", i)
+
 
 # Rule 10 – last_workshop_visit_spareparts grid: only quota brand should have a response
 spare_cols = [c for c in df.columns if c.startswith("last_workshop_visit_spareparts_b")]
@@ -273,15 +279,13 @@ if spare_cols and "quota_make" in df.columns:
             add_issue(10, f"No column found for quota_make={qmake}", i)
             continue
 
-        # Quota brand cell must be filled
-        if pd.isna(row.get(quota_col)):
+        if is_blank(row.get(quota_col)):
             add_issue(10, f"Missing last_workshop_visit_spareparts for quota brand ({quota_col})", i)
 
-        # All other brands must be blank
-        other_cols = [c for c in spare_cols if c != quota_col]
-        for c in other_cols:
-            if pd.notna(row.get(c)):
+        for c in [col for col in spare_cols if col != quota_col]:
+            if not is_blank(row.get(c)):
                 add_issue(10, f"Non-quota brand {c} should be blank", i)
+
 
 
 # Rule 11 – familiarity adjust
@@ -316,6 +320,18 @@ if cons_cols and "quota_make" in df.columns:
             continue
 
         # Quota brand must have a valid (non-blank) value
+        if is_blank(row.get(quota_col)):
+            add_issue(13, f"Missing consideration for quota brand ({quota_col})", i)
+
+        # All other brand columns must be blank
+        other_cols = [c for c in cons_cols if c != quota_col]
+        for c in other_cols:
+            val = row.get(c)
+            if not is_blank(val):
+                add_issue(13, f"Non-quota brand {c} should be blank", i)
+
+
+        # Quota brand must have a valid (non-blank) value
         if pd.isna(row.get(quota_col)) or str(row.get(quota_col)).strip() == "":
             add_issue(13, f"Missing consideration for quota brand ({quota_col})", i)
 
@@ -338,29 +354,19 @@ cons_cols = [c for c in df.columns if c.startswith("consideration_b")]
 perf_cols = [c for c in df.columns if c.startswith("performance_b")]
 
 if cons_cols and perf_cols:
-    # Calculate if any brand considered at all (row-wise)
     any_considered = df[cons_cols].fillna(0).astype(float).sum(axis=1) > 0
-
-    # Loop through each performance column (brand-specific)
     for pcol in perf_cols:
-        m = re.search(r"_b(\d+)$", pcol)
-        if not m:
-            continue
-        bid = m.group(1)
-        perf = df[pcol]
-        has_val = perf.notna() & (perf.astype(str).str.strip() != "")
-
-        # Violation: no brands considered but performance filled
+        has_val = df[pcol].apply(lambda v: not is_blank(v))
         bad = (~any_considered) & has_val
         for i in df[bad].index:
             add_issue(15, f"{pcol} should be blank (no brands considered in B3.a)", i)
+
 
 # Rule 16 – Closeness grid: should only be filled for considered brands
 cons_cols = [c for c in df.columns if c.startswith("consideration_b")]
 close_cols = [c for c in df.columns if c.startswith("closeness_b")]
 
 if cons_cols and close_cols:
-    # Loop brand-by-brand
     for c in cons_cols:
         m = re.search(r"_b(\d+)$", c)
         if not m:
@@ -370,13 +376,12 @@ if cons_cols and close_cols:
         if close_col not in close_cols:
             continue
 
-        # If brand not considered, closeness must be blank
-        not_considered = (df[c].fillna(0).astype(float) != 1)
-        has_closeness = df[close_col].notna() & (df[close_col].astype(str).str.strip() != "")
-        bad = not_considered & has_closeness
-
+        not_considered = df[c].fillna(0).astype(float) != 1
+        has_val = df[close_col].apply(lambda v: not is_blank(v))
+        bad = not_considered & has_val
         for i in df[bad].index:
             add_issue(16, f"{close_col} should be blank (brand not considered)", i)
+
 
 # Rule 17 – Image grid: should only be filled for aware/usage/familiar brands
 aware_cols = [c for c in df.columns if c.startswith("unaided_aware_b")]
