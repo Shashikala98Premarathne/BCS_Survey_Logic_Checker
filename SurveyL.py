@@ -33,7 +33,7 @@ def set_background_solid(main="#6CD7E551", sidebar="#EEEFF3"):
 set_background_solid()
    
 st.title("📊 BCS Survey Logic Checker")
-st.caption("This tool is specifically designed for BCS Thailand/Taiwan. Identified mismatches will be highlighted in the deliverables..")
+st.caption("This tool is specifically designed for BCS Thailand/Taiwan. Identified mismatches will be highlighted in the deliverables.")
 
 # -------------------------------------------------------------------
 # File helpers
@@ -477,31 +477,39 @@ if "quota_make" in df.columns and (df["quota_make"]==38).any():
             for i in df[df["quota_make"]==38].index:
                 add_issue(21,f"Missing {c} for Volvo",i)
 
-# Rule 22 – Barriers: only if Volvo (38) NOT considered in B3.a
+# Rule 22 23– Barriers: only if Volvo (38) NOT considered in B3.a
 consid_col = "consideration_b38"
+reason_prefix = "reasons_not_consider_volvo_"
+reason_cols = [c for c in df.columns if c.startswith(reason_prefix)]
+
 if consid_col in df.columns:
     for i, row in df.iterrows():
         considered_volvo = str(row.get(consid_col, "")).strip() in {"1", "1.0"}
         if considered_volvo:
             continue  # skip — Volvo considered
 
-        # Volvo not considered → must have reasons_not_consider_volvo
-        if "reasons_not_consider_volvo" not in df.columns:
-            add_issue(22, "Missing reasons_not_consider_volvo column", i)
+        # ---- Check presence of reason columns ----
+        if not reason_cols:
+            add_issue(22, "Missing reasons_not_consider_volvo_* columns", i)
             continue
 
-        reasons = row.get("reasons_not_consider_volvo")
-        if pd.isna(reasons) or str(reasons).strip() == "":
-            add_issue(22, "Missing reasons_not_consider_volvo (Volvo not considered)", i)
+        # ---- Check if respondent selected any barrier ----
+        selected_codes = []
+        for c in reason_cols:
+            m = re.search(r"_(\d+)$", c)
+            if not m:
+                continue
+            code = m.group(1)
+            val = row.get(c)
+            if not is_blank(val) and str(val).strip() in {"1", "1.0"}:
+                selected_codes.append(code)
+
+        # ---- If none selected, raise issue ----
+        if not selected_codes:
+            add_issue(22, "Missing reasons_not_consider_volvo selection (Volvo not considered)", i)
             continue
 
-        # Normalize multi-select responses (comma, space, list, etc.)
-        if isinstance(reasons, (list, set, tuple)):
-            selected = {str(x).strip() for x in reasons}
-        else:
-            selected = {s.strip() for s in str(reasons).replace(";", ",").split(",") if s.strip()}
-
-        # Check for follow-up conditions
+        # ---- Follow-up mapping ----
         follow_map = {
             "3": "a_barriers_follow_up",
             "4": "b_barriers_follow_up",
@@ -509,12 +517,13 @@ if consid_col in df.columns:
         }
 
         for code, follow_var in follow_map.items():
-            if code in selected:
+            if code in selected_codes:
                 if follow_var not in df.columns:
-                    add_issue(23, f"Missing {follow_var} column", i)
+                    add_issue(23, f"Missing {follow_var} column (required for code {code})", i)
                     continue
-                if pd.isna(row.get(follow_var)) or str(row.get(follow_var)).strip() == "":
-                    add_issue(23, f"Missing {follow_var} (required for code {code})", i)
+                if is_blank(row.get(follow_var)):
+                    add_issue(23, f"Missing {follow_var} response (required for code {code})", i)
+
 
 
 # Rule 24 – transport_type
