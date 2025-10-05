@@ -412,7 +412,7 @@ if image_cols:
 # Rule 18 – Image option 31 (country-specific) should not exist
 bad_image_cols = [c for c in df.columns if c.lower().startswith("image_31_b")]
 for c in bad_image_cols:
-    add_issue(18, f"Column {c} should NOT exist (option 31 is country-specific)", i)
+    add_issue(18, f"Column {c} should NOT exist (option 31 is country-specific)")
 
 # Rule 19 – truck_defects
 if "truck_defects" in df.columns and "truck_defects_other_specify" in df.columns:
@@ -422,7 +422,7 @@ if "truck_defects" in df.columns and "truck_defects_other_specify" in df.columns
 # Rule 20 – workshop_rating_14 should NOT exist (country-specific)
 bad_workshop_cols = [c for c in df.columns if c.lower().startswith("workshop_rating_14")]
 for c in bad_workshop_cols:
-    add_issue(20, f"Column {c} should NOT exist (option 14 is country-specific)", i)
+    add_issue(20, f"Column {c} should NOT exist (option 14 is country-specific)")
 
 # Rule 21 – Volvo comments
 if "quota_make" in df.columns and (df["quota_make"]==38).any():
