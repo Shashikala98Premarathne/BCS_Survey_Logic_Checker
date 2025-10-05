@@ -107,28 +107,33 @@ df.replace(
 # Rules list
 # -------------------------------------------------------------------
 SURVEY_RULES = {
-    1: "Decision_maker=2 → terminate",
-    2: "Fleet_knowledge=2 → terminate",
-    3: "Company_position=98 → require OE",
-    4: "HD trucks (S3) 0–99999, terminate if 0",
-    5: "S3a sum must = S3",
-    6: "Last purchase required if S3>0",
-    7: "Main_brand autocode if single usage",
-    8: "Quota_make must equal main_brand",
-    9: "last_purchase_bX grid – only quota_make brand should have a value",
-    10: "last_workshop_visit_bX grid – only quota_make brand should have a value",
-    11: "last_workshop_visit_spareparts_bX grid – only quota_make brand should have a value",
-    12: "Familiarity values 1–5, adjust if aware/usage",
-    13: "Impression required if fam=2–5",
-    14: "Preference auto if single consideration",
-    15: "Quota satisfaction set required (E1, E4, E4b, E4c, F1, F2–F6)",
-    16: "Truck_defects=1 → require OE",
-    17: "Volvo quota → require satisfaction & dissatisfaction comments",
-    18: "Barriers → require F9 follow-ups",
-    19: "Transport_type=98 → require OE",
-    20: "Volvo/Renault/Mack/Eicher quota → require operation_range_volvo_hdt",
-    21: "Anonymity required for Volvo/Renault/Mack/Eicher",
-    22: "System fields (region,country,survey_year) required"
+    1:  "Decision_maker = 2 → terminate case",
+    2:  "Fleet_knowledge = 2 → terminate case",
+    3:  "Company_position = 98 → require company_position_other_specify",
+    4:  "n_heavy_duty_trucks must be 0–99999; terminate if 0",
+    5:  "n_tractors / n_rigids / n_tippers must be valid (0–99999)",
+    6:  "Sum of n_tractors + n_rigids + n_tippers must equal n_heavy_duty_trucks",
+    7:  "Missing last_purchase_hdt variable (required)",
+    8:  "If only one brand used → main_brand should be auto-coded from usage",
+    9:  "Quota_make must equal main_brand",
+    10: "last_purchase_bX grid – only quota_make brand should have a response (others blank)",
+    11: "last_workshop_visit_bX grid – only quota_make brand should have a response (others blank)",
+    12: "last_workshop_visit_spareparts_bX grid – only quota_make brand should have a response (others blank)",
+    13: "Familiarity = 1 invalid if brand aware/used",
+    14: "If familiarity=2–5 → overall_impression_bX must be answered",
+    15: "Consideration_bX grid – only quota_make brand should have a value (others blank)",
+    16: "Preference should auto-fill if only one brand considered",
+    17: "Closeness_bX grid – should only be filled for considered brands (consideration_bX=1)",
+    18: "Image_bX grid – should only be filled for brands that are aware, used, or have familiarity 2–5",
+    19: "Image_31_bX should NOT exist (country-specific option)",
+    20: "truck_defects=1 → require truck_defects_other_specify (OE)",
+    21: "workshop_rating_14 should NOT exist (country-specific option)",
+    22: "Quota_make=Volvo → require satisfaction_comments & dissatisfaction_comments",
+    23: "If Volvo (38) NOT considered → reasons_not_consider_volvo required + F9 follow-ups if codes 3/4/10",
+    24: "transport_type=98 → require transport_type_other_specify (OE)",
+    25: "Volvo/Renault/Mack/Eicher quota → require operation_range_volvo_hdt",
+    26: "Volvo/Renault/Mack/Eicher quota → require anonymity",
+    27: "System fields region, country, and survey_year must exist",
 }
 
 digest, detailed = [], []
@@ -165,188 +170,346 @@ if "n_heavy_duty_trucks" in df.columns:
     for i in df[(vals<0)|(vals>99999)].index: add_issue(4,"Out of range S3",i)
     for i in df[vals==0].index: add_issue(4,"S3=0 (terminate)",i)
 
-# Rule 5 – S3a sum check
-if set(["n_tractors","n_rigids","n_tippers","n_heavy_duty_trucks"]).issubset(df.columns):
-    bad = df["n_heavy_duty_trucks"] != (df["n_tractors"]+df["n_rigids"]+df["n_tippers"])
-    for i in df[bad].index: add_issue(5,"S3a1+2+3 != S3",i)
+# Rule 5 & 6 – Check S3a subtypes (tractors/rigids/tippers)
+needed_cols = ["n_tractors", "n_rigids", "n_tippers", "n_heavy_duty_trucks"]
+if set(needed_cols).issubset(df.columns):
 
-# Rule 6 – last_purchase_hdt required
+    for col in ["n_tractors", "n_rigids", "n_tippers"]:
+        vals = pd.to_numeric(df[col], errors="coerce")
+        # Range check 0–99999
+        out_of_range = (vals < 0) | (vals > 99999) | vals.isna()
+        for i in df[out_of_range].index:
+            add_issue(5, f"{col} out of range or invalid (must be 0–99999)", i)
+
+    # Sum consistency check
+    vals_S3 = pd.to_numeric(df["n_heavy_duty_trucks"], errors="coerce")
+    vals_t = pd.to_numeric(df["n_tractors"], errors="coerce")
+    vals_r = pd.to_numeric(df["n_rigids"], errors="coerce")
+    vals_tp = pd.to_numeric(df["n_tippers"], errors="coerce")
+
+    bad_sum = vals_S3 != (vals_t.fillna(0) + vals_r.fillna(0) + vals_tp.fillna(0))
+    for i in df[bad_sum].index:
+        add_issue(6, "Sum mismatch: n_tractors + n_rigids + n_tippers ≠ n_heavy_duty_trucks", i)
+
+
+# Rule 7 – last_purchase_hdt required
 if "last_purchase_hdt" not in df.columns:
-    add_issue(6,"Missing last_purchase_hdt")
+    add_issue(7,"Missing last_purchase_hdt")
 
-# Rule 7 – main_brand auto if single usage
+# Rule 8 – main_brand auto if single usage
 usage_cols = [c for c in df.columns if c.startswith("usage_b")]
 if "main_brand" in df.columns and usage_cols:
     one_brand = df[usage_cols].sum(axis=1)==1
     for i in df[one_brand & (df["main_brand"].isna())].index:
-        add_issue(7,"main_brand should be auto from usage",i)
+        add_issue(8,"main_brand should be auto from usage",i)
 
-# Rule 8 – quota_make consistency
+# Rule 9 – quota_make consistency
 if "main_brand" in df.columns and "quota_make" in df.columns:
     bad = df["main_brand"]!=df["quota_make"]
-    for i in df[bad].index: add_issue(8,"quota_make≠main_brand",i)
+    for i in df[bad].index: add_issue(9,"quota_make≠main_brand",i)
 
-# Rule 9 – last_purchase grid: only quota brand should have a response
+# Rule 10 – last_purchase grid: only quota brand should have a response
 last_purch_cols = [c for c in df.columns if c.startswith("last_purchase_b")]
 if last_purch_cols and "quota_make" in df.columns:
-    for i, row in df.iterrows():
-        qmake = str(row["quota_make"]).strip()
-        if qmake in {"nan", "None", "", "NaN"}:
-            add_issue(9, "Missing quota_make", i)
-            continue
-
-        quota_col = f"last_purchase_b{qmake}"
-        if quota_col not in last_purch_cols:
-            add_issue(9, f"No column found for quota_make={qmake}", i)
-            continue
-
-        # Check: quota brand cell must be filled
-        if pd.isna(row.get(quota_col)):
-            add_issue(9, f"Missing last_purchase for quota brand ({quota_col})", i)
-
-        # Check: all other brand cells must be blank
-        other_cols = [c for c in last_purch_cols if c != quota_col]
-        for c in other_cols:
-            if pd.notna(row.get(c)):
-                add_issue(9, f"Non-quota brand {c} should be blank", i)
-
-
-# Rule 10 – last_workshop_visit grid: only quota brand should have a response
-workshop_cols = [c for c in df.columns if c.startswith("last_workshop_visit_b")]
-if workshop_cols and "quota_make" in df.columns:
     for i, row in df.iterrows():
         qmake = str(row["quota_make"]).strip()
         if qmake in {"nan", "None", "", "NaN"}:
             add_issue(10, "Missing quota_make", i)
             continue
 
-        quota_col = f"last_workshop_visit_b{qmake}"
-        if quota_col not in workshop_cols:
+        quota_col = f"last_purchase_b{qmake}"
+        if quota_col not in last_purch_cols:
             add_issue(10, f"No column found for quota_make={qmake}", i)
             continue
 
-        # Quota brand cell must be filled
+        # Check: quota brand cell must be filled
         if pd.isna(row.get(quota_col)):
-            add_issue(10, f"Missing last_workshop_visit for quota brand ({quota_col})", i)
+            add_issue(10, f"Missing last_purchase for quota brand ({quota_col})", i)
 
-        # All other brands must be blank
-        other_cols = [c for c in workshop_cols if c != quota_col]
+        # Check: all other brand cells must be blank
+        other_cols = [c for c in last_purch_cols if c != quota_col]
         for c in other_cols:
             if pd.notna(row.get(c)):
                 add_issue(10, f"Non-quota brand {c} should be blank", i)
 
-# Rule 11 – last_workshop_visit_spareparts grid: only quota brand should have a response
-spare_cols = [c for c in df.columns if c.startswith("last_workshop_visit_spareparts_b")]
-if spare_cols and "quota_make" in df.columns:
+
+# Rule 11 – last_workshop_visit grid: only quota brand should have a response
+workshop_cols = [c for c in df.columns if c.startswith("last_workshop_visit_b")]
+if workshop_cols and "quota_make" in df.columns:
     for i, row in df.iterrows():
         qmake = str(row["quota_make"]).strip()
         if qmake in {"nan", "None", "", "NaN"}:
             add_issue(11, "Missing quota_make", i)
             continue
 
-        quota_col = f"last_workshop_visit_spareparts_b{qmake}"
-        if quota_col not in spare_cols:
+        quota_col = f"last_workshop_visit_b{qmake}"
+        if quota_col not in workshop_cols:
             add_issue(11, f"No column found for quota_make={qmake}", i)
             continue
 
         # Quota brand cell must be filled
         if pd.isna(row.get(quota_col)):
-            add_issue(11, f"Missing last_workshop_visit_spareparts for quota brand ({quota_col})", i)
+            add_issue(11, f"Missing last_workshop_visit for quota brand ({quota_col})", i)
+
+        # All other brands must be blank
+        other_cols = [c for c in workshop_cols if c != quota_col]
+        for c in other_cols:
+            if pd.notna(row.get(c)):
+                add_issue(11, f"Non-quota brand {c} should be blank", i)
+
+# Rule 12 – last_workshop_visit_spareparts grid: only quota brand should have a response
+spare_cols = [c for c in df.columns if c.startswith("last_workshop_visit_spareparts_b")]
+if spare_cols and "quota_make" in df.columns:
+    for i, row in df.iterrows():
+        qmake = str(row["quota_make"]).strip()
+        if qmake in {"nan", "None", "", "NaN"}:
+            add_issue(12, "Missing quota_make", i)
+            continue
+
+        quota_col = f"last_workshop_visit_spareparts_b{qmake}"
+        if quota_col not in spare_cols:
+            add_issue(12, f"No column found for quota_make={qmake}", i)
+            continue
+
+        # Quota brand cell must be filled
+        if pd.isna(row.get(quota_col)):
+            add_issue(12, f"Missing last_workshop_visit_spareparts for quota brand ({quota_col})", i)
 
         # All other brands must be blank
         other_cols = [c for c in spare_cols if c != quota_col]
         for c in other_cols:
             if pd.notna(row.get(c)):
-                add_issue(11, f"Non-quota brand {c} should be blank", i)
+                add_issue(12, f"Non-quota brand {c} should be blank", i)
 
 
-# Rule 12 – familiarity adjust
+# Rule 13 – familiarity adjust
 for col in [c for c in df.columns if c.startswith("familiarity_b")]:
     bid = col.split("_b")[-1]
     aware,usage = f"unaided_aware_b{bid}", f"usage_b{bid}"
     if aware in df.columns and usage in df.columns:
         bad = (df[aware]==1)|(df[usage]==1)
         for i in df[bad & (df[col]==1)].index:
-            add_issue(12,f"{col}=1 despite awareness/usage",i)
+            add_issue(13,f"{col}=1 despite awareness/usage",i)
 
-# Rule 13 – impression required if fam=2–5
+# Rule 14 – impression required if fam=2–5
 for col in [c for c in df.columns if c.startswith("familiarity_b")]:
     bid = col.split("_b")[-1]
     imp = f"overall_impression_b{bid}"
     if imp in df.columns:
         bad = df[col].isin([2,3,4,5]) & df[imp].isna()
-        for i in df[bad].index: add_issue(13,f"{imp} missing where fam=2–5",i)
+        for i in df[bad].index: add_issue(14,f"{imp} missing where fam=2–5",i)
+        
+# Rule 15 – Consideration grid: should only be answered for quota make brand
+cons_cols = [c for c in df.columns if c.startswith("consideration_b")]
+if cons_cols and "quota_make" in df.columns:
+    for i, row in df.iterrows():
+        qmake = str(row["quota_make"]).strip()
+        if qmake in {"nan", "None", "", "NaN"}:
+            add_issue(15, "Missing quota_make", i)
+            continue
 
-# Rule 14 – preference auto
+        quota_col = f"consideration_b{qmake}"
+        if quota_col not in cons_cols:
+            add_issue(15, f"No consideration column found for quota_make={qmake}", i)
+            continue
+
+        # Quota brand must have a valid (non-blank) value
+        if pd.isna(row.get(quota_col)) or str(row.get(quota_col)).strip() == "":
+            add_issue(15, f"Missing consideration for quota brand ({quota_col})", i)
+
+        # All other brand columns must be blank
+        other_cols = [c for c in cons_cols if c != quota_col]
+        for c in other_cols:
+            val = row.get(c)
+            if pd.notna(val) and str(val).strip() != "":
+                add_issue(15, f"Non-quota brand {c} should be blank", i)
+
+# Rule 17 – preference auto
 cons_cols = [c for c in df.columns if c.startswith("consideration_b")]
 if "preference" in df.columns and cons_cols:
     one = df[cons_cols].sum(axis=1)==1
     for i in df[one & df["preference"].isna()].index:
-        add_issue(14,"preference should be auto from consideration",i)
+        add_issue(17,"preference should be auto from consideration",i)
 
-# Rule 15 – quota satisfaction set
-req = ["overall_satisfaction","likelihood_choose_brand","likelihood_choose_workshop","preference_strength","overall_rating_truck"]
-for c in req:
-    if c not in df.columns:
-        add_issue(15,f"Missing {c}")
+# Rule 18 – Closeness grid: should only be filled for considered brands
+cons_cols = [c for c in df.columns if c.startswith("consideration_b")]
+close_cols = [c for c in df.columns if c.startswith("closeness_b")]
 
-# Rule 16 – truck_defects
+if cons_cols and close_cols:
+    # Loop brand-by-brand
+    for c in cons_cols:
+        m = re.search(r"_b(\d+)$", c)
+        if not m:
+            continue
+        bid = m.group(1)
+        close_col = f"closeness_b{bid}"
+        if close_col not in close_cols:
+            continue
+
+        # If brand not considered, closeness must be blank
+        not_considered = (df[c].fillna(0).astype(float) != 1)
+        has_closeness = df[close_col].notna() & (df[close_col].astype(str).str.strip() != "")
+        bad = not_considered & has_closeness
+
+        for i in df[bad].index:
+            add_issue(18, f"{close_col} should be blank (brand not considered)", i)
+
+# Rule 19 – Image grid: should only be filled for aware/usage/familiar brands
+aware_cols = [c for c in df.columns if c.startswith("unaided_aware_b")]
+usage_cols = [c for c in df.columns if c.startswith("usage_b")]
+familiarity_cols = [c for c in df.columns if c.startswith("familiarity_b")]
+image_cols = [c for c in df.columns if c.startswith("image_b")]
+
+if image_cols:
+    for img_col in image_cols:
+        m = re.search(r"_b(\d+)$", img_col)
+        if not m:
+            continue
+        bid = m.group(1)
+        aware_col = f"unaided_aware_b{bid}"
+        usage_col = f"usage_b{bid}"
+        fam_col = f"familiarity_b{bid}"
+
+        # Skip if brand not in any of those grids
+        if all(c not in df.columns for c in [aware_col, usage_col, fam_col]):
+            continue
+
+        aware = df[aware_col] if aware_col in df.columns else 0
+        usage = df[usage_col] if usage_col in df.columns else 0
+        fam = df[fam_col] if fam_col in df.columns else np.nan
+
+        allowed = (aware == 1) | (usage == 1) | (fam.isin([2, 3, 4, 5]))
+        has_image = df[img_col].notna() & (df[img_col].astype(str).str.strip() != "")
+
+        bad = (~allowed) & has_image
+        for i in df[bad].index:
+            add_issue(19, f"{img_col} should be blank (brand not aware/used/familiar)", i)
+
+# Rule 20 – Image option 31 (country-specific) should not exist
+bad_image_cols = [c for c in df.columns if c.lower().startswith("image_31_b")]
+for c in bad_image_cols:
+    add_issue(20, f"Column {c} should NOT exist (option 31 is country-specific)")
+
+# Rule 21 – truck_defects
 if "truck_defects" in df.columns and "truck_defects_other_specify" in df.columns:
     bad = (df["truck_defects"]==1)&df["truck_defects_other_specify"].isna()
-    for i in df[bad].index: add_issue(16,"Missing OE for truck_defects=1",i)
+    for i in df[bad].index: add_issue(21,"Missing OE for truck_defects=1",i)
 
-# Rule 17 – Volvo comments
+# Rule 22 – workshop_rating_14 should NOT exist (country-specific)
+bad_workshop_cols = [c for c in df.columns if c.lower().startswith("workshop_rating_14")]
+for c in bad_workshop_cols:
+    add_issue(22, f"Column {c} should NOT exist (option 14 is country-specific)")
+
+# Rule 23 – Volvo comments
 if "quota_make" in df.columns and (df["quota_make"]==38).any():
     for c in ["satisfaction_comments","dissatisfaction_comments"]:
         if c not in df.columns:
             for i in df[df["quota_make"]==38].index:
-                add_issue(17,f"Missing {c} for Volvo",i)
+                add_issue(23,f"Missing {c} for Volvo",i)
 
-# Rule 18 – barriers
-if "reasons_not_consider_volvo" in df.columns:
-    for follow in ["a_barriers_follow_up","b_barriers_follow_up","c_barriers_follow_up"]:
-        if follow not in df.columns:
-            for i in df.index: add_issue(18,f"Missing {follow}",i)
+# Rule 24 – Barriers: only if Volvo (38) NOT considered in B3.a
+consid_col = "consideration_b38"
+if consid_col in df.columns:
+    for i, row in df.iterrows():
+        considered_volvo = str(row.get(consid_col, "")).strip() in {"1", "1.0"}
+        if considered_volvo:
+            continue  # skip — Volvo considered
 
-# Rule 19 – transport_type
+        # Volvo not considered → must have reasons_not_consider_volvo
+        if "reasons_not_consider_volvo" not in df.columns:
+            add_issue(24, "Missing reasons_not_consider_volvo column", i)
+            continue
+
+        reasons = row.get("reasons_not_consider_volvo")
+        if pd.isna(reasons) or str(reasons).strip() == "":
+            add_issue(24, "Missing reasons_not_consider_volvo (Volvo not considered)", i)
+            continue
+
+        # Normalize multi-select responses (comma, space, list, etc.)
+        if isinstance(reasons, (list, set, tuple)):
+            selected = {str(x).strip() for x in reasons}
+        else:
+            selected = {s.strip() for s in str(reasons).replace(";", ",").split(",") if s.strip()}
+
+        # Check for follow-up conditions
+        follow_map = {
+            "3": "a_barriers_follow_up",
+            "4": "b_barriers_follow_up",
+            "10": "c_barriers_follow_up",
+        }
+
+        for code, follow_var in follow_map.items():
+            if code in selected:
+                if follow_var not in df.columns:
+                    add_issue(25, f"Missing {follow_var} column", i)
+                    continue
+                if pd.isna(row.get(follow_var)) or str(row.get(follow_var)).strip() == "":
+                    add_issue(25, f"Missing {follow_var} (required for code {code})", i)
+
+
+# Rule 26 – transport_type
 if "transport_type" in df.columns and "transport_type_other_specify" in df.columns:
     bad = (df["transport_type"]==98)&df["transport_type_other_specify"].isna()
-    for i in df[bad].index: add_issue(19,"Missing OE for transport_type=98",i)
+    for i in df[bad].index: add_issue(26,"Missing OE for transport_type=98",i)
 
-# Rule 20 – operation_range
+# Rule 27 – operation_range
 if "quota_make" in df.columns and "operation_range_volvo_hdt" in df.columns:
     bad = df["quota_make"].isin([38,31,23,9]) & df["operation_range_volvo_hdt"].isna()
-    for i in df[bad].index: add_issue(20,"Missing operation_range_volvo_hdt",i)
+    for i in df[bad].index: add_issue(27,"Missing operation_range_volvo_hdt",i)
 
-# Rule 21 – anonymity
+# Rule 28 – anonymity
 if "quota_make" in df.columns and "anonymity" in df.columns:
     bad = df["quota_make"].isin([38,31,23,9]) & df["anonymity"].isna()
-    for i in df[bad].index: add_issue(21,"Missing anonymity",i)
+    for i in df[bad].index: add_issue(28,"Missing anonymity",i)
 
-# Rule 22 – system fields
+#Rule 29 – system fields
 for sysc in ["region","country","survey_year"]:
     if sysc not in df.columns:
-        add_issue(22,f"Missing {sysc}")
+        add_issue(29,f"Missing {sysc}")
 
 # -------------------------------------------------------------------
 # Outputs
 # -------------------------------------------------------------------
-digest_df = pd.DataFrame(digest,columns=["RuleID","Issue"]).drop_duplicates()
-detailed_df = pd.DataFrame(detailed,columns=["RowID","RuleID","Issue"])
+# Convert detailed issues to DataFrame
+if detailed:
+    results_df = pd.DataFrame(detailed, columns=["RowID", "RuleID", "Issue"])
+
+    # Map rule descriptions
+    results_df["Rule Description"] = results_df["RuleID"].map(SURVEY_RULES)
+
+    # Add respondent ID if column exists in dataset
+    if "respid" in df.columns:
+        results_df["Respondent ID"] = results_df["RowID"].apply(
+            lambda i: df.loc[i, "respid"] if i in df.index else np.nan
+        )
+    else:
+        results_df["Respondent ID"] = np.nan
+
+    # Reorder columns for readability
+    results_df = results_df[
+        ["Respondent ID", "RowID", "RuleID", "Rule Description", "Issue"]
+    ]
+else:
+    results_df = pd.DataFrame(columns=["Respondent ID", "RowID", "RuleID", "Rule Description", "Issue"])
+
 
 st.subheader("Survey Logic Issues")
-if digest_df.empty:
+if results_df.empty:
     st.success("✅ No issues found – dataset follows survey logic.")
 else:
-    st.dataframe(digest_df, use_container_width=True)
+    st.dataframe(results_df, use_container_width=True)
 
-    out = io.BytesIO()
-    with pd.ExcelWriter(out,engine="xlsxwriter") as writer:
-        digest_df.to_excel(writer,index=False,sheet_name="Digest")
-        detailed_df.to_excel(writer,index=False,sheet_name="Detailed")
-    st.download_button(
-        "📥 Download Issues (Excel)",
-        data=out.getvalue(),
-        file_name="survey_logic_issues.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+from io import BytesIO
+
+output = BytesIO()
+with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+    pd.DataFrame(digest, columns=["RuleID", "Issue"]).to_excel(writer, index=False, sheet_name="Digest")
+    results_df.to_excel(writer, index=False, sheet_name="Detailed")
+output.seek(0)
+
+st.download_button(
+    label="📥 Download Validation Report",
+    data=output,
+    file_name="BCS_Logic_Check_Report.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
