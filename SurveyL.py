@@ -121,7 +121,7 @@ SURVEY_RULES = {
     10: "last_workshop_visit_spareparts_bX grid – only quota_make brand should have a response (others blank)",
     11: "Familiarity = 1 invalid if brand aware/used",
     12: "If familiarity=2–5 → overall_impression_bX must be answered",
-    13: "Consideration_bX grid – only quota_make brand should have a value (others blank)",
+    13: "Consideration_bX grid – country specific master brands should have a value (others blank)",
     14: "Preference should auto-fill if only one brand considered",
     15: "Performance should be blank if no brands considered",
     16: "Closeness_bX grid – should only be filled for considered brands (consideration_bX=1)",
@@ -341,65 +341,43 @@ for col in [c for c in df.columns if c.startswith("familiarity_b")]:
         bad = df[col].isin([2,3,4,5]) & df[imp].isna()
         for i in df[bad].index: add_issue(12,f"{imp} missing where fam=2–5",i)
 
-# Rule 13 – Consideration grid: should only contain brands valid for respondent's country
+# Rule 13 – Consideration grid: only brands valid for respondent's country should be visible
 cons_cols = [c for c in df.columns if c.startswith("consideration_b")]
 if cons_cols and "quota_make" in df.columns and "country" in df.columns:
     for i, row in df.iterrows():
         valid_brands = get_country_brands(row)
         qmake = str(row["quota_make"]).strip()
-        if qmake in {"nan", "None", "", "NaN"}:
+        if qmake in {"nan", "none", "", "NaN"}:
             add_issue(13, "Missing quota_make", i)
             continue
 
-        quota_col = f"consideration_b{qmake}"
-        if quota_col not in cons_cols:
-            add_issue(13, f"No consideration column found for quota_make={qmake}", i)
-            continue
-
-        # Quota brand must have value (not blank)
-        if is_blank(row.get(quota_col)):
-            add_issue(13, f"Missing consideration for quota brand ({quota_col})", i)
-
-        # Check all other brand columns
+        # Loop through each brand column only once
         for c in cons_cols:
             m = re.search(r"_b(\d+)$", c)
             if not m:
                 continue
             bid = int(m.group(1))
+            val = row.get(c)
 
-            # If brand not valid for this respondent’s country, must be blank
-            if bid not in valid_brands:
-                if not is_blank(row.get(c)):
-                    add_issue(13, f"{c} should be blank (brand not asked in {row.get('country')})", i)
+            # Skip blank/null cells entirely
+            if is_blank(val):
                 continue
 
-            # If brand valid and not quota brand, must be blank
-            if str(bid) != qmake and not is_blank(row.get(c)):
+            # If brand not valid for this country → must be blank
+            if bid not in valid_brands:
+                add_issue(13, f"{c} should be blank (brand not asked in {row.get('country')})", i)
+                continue
+
+            # If brand is valid but not quota brand → must be blank
+            if str(bid) != qmake:
                 add_issue(13, f"Non-quota brand {c} should be blank", i)
+                continue
 
-
-        # Quota brand must have a valid (non-blank) value
-        if is_blank(row.get(quota_col)):
+        # Finally, ensure quota brand cell has a value
+        quota_col = f"consideration_b{qmake}"
+        if quota_col in df.columns and is_blank(row.get(quota_col)):
             add_issue(13, f"Missing consideration for quota brand ({quota_col})", i)
 
-        # All other brand columns must be blank
-        other_cols = [c for c in cons_cols if c != quota_col]
-        for c in other_cols:
-            val = row.get(c)
-            if not is_blank(val):
-                add_issue(13, f"Non-quota brand {c} should be blank", i)
-
-
-        # Quota brand must have a valid (non-blank) value
-        if pd.isna(row.get(quota_col)) or str(row.get(quota_col)).strip() == "":
-            add_issue(13, f"Missing consideration for quota brand ({quota_col})", i)
-
-        # All other brand columns must be blank
-        other_cols = [c for c in cons_cols if c != quota_col]
-        for c in other_cols:
-            val = row.get(c)
-            if pd.notna(val) and str(val).strip() != "":
-                add_issue(13, f"Non-quota brand {c} should be blank", i)
 
 # Rule 14 – preference auto
 cons_cols = [c for c in df.columns if c.startswith("consideration_b")]
