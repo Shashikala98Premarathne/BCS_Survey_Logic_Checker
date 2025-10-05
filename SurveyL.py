@@ -164,14 +164,13 @@ COUNTRY_BRANDS = {
     },
 }
 
-def get_country_brands(df_row) -> set[int]:
-    """Return the set of brand codes valid for the respondent's country."""
+def get_country_brands(df_row) -> set[int] | None:
+    """Return brand codes for respondent’s country, or None if outside project scope."""
     country = str(df_row.get("country", "")).strip().title()
     if country in COUNTRY_BRANDS:
         return set(COUNTRY_BRANDS[country].keys())
-    # Default: if no country or unknown, include all to avoid false errors
-    all_codes = set().union(*[set(v.keys()) for v in COUNTRY_BRANDS.values()])
-    return all_codes
+    return None  # country not covered (Malaysia, etc.)
+
 
 # -------------------------------------------------------------------
 digest, detailed = [], []
@@ -346,6 +345,12 @@ cons_cols = [c for c in df.columns if c.startswith("consideration_b")]
 if cons_cols and "quota_make" in df.columns and "country" in df.columns:
     for i, row in df.iterrows():
         valid_brands = get_country_brands(row)
+
+        # 🚫 Skip respondents from countries not in Thailand/Taiwan scope
+        if valid_brands is None:
+            add_issue(13, f"Respondent from {row.get('country')} not in project scope (Thailand/Taiwan only)", i)
+            continue
+
         qmake = str(row["quota_make"]).strip()
         if qmake in {"nan", "none", "", "NaN"}:
             add_issue(13, "Missing quota_make", i)
@@ -359,7 +364,6 @@ if cons_cols and "quota_make" in df.columns and "country" in df.columns:
             bid = int(m.group(1))
             val = row.get(c)
 
-            # Skip blank/null cells entirely
             if is_blank(val):
                 continue
 
@@ -368,15 +372,15 @@ if cons_cols and "quota_make" in df.columns and "country" in df.columns:
                 add_issue(13, f"{c} should be blank (brand not asked in {row.get('country')})", i)
                 continue
 
-            # If brand is valid but not quota brand → must be blank
+            # If brand valid but not quota brand → must be blank
             if str(bid) != qmake:
                 add_issue(13, f"Non-quota brand {c} should be blank", i)
-                continue
 
-        # Finally, ensure quota brand cell has a value
+        # Ensure quota brand cell has a value
         quota_col = f"consideration_b{qmake}"
         if quota_col in df.columns and is_blank(row.get(quota_col)):
             add_issue(13, f"Missing consideration for quota brand ({quota_col})", i)
+
 
 
 # Rule 14 – preference auto
