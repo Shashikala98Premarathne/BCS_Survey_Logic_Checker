@@ -346,17 +346,19 @@ if cons_cols and "quota_make" in df.columns and "country" in df.columns:
     for i, row in df.iterrows():
         valid_brands = get_country_brands(row)
 
-        # 🚫 Skip respondents from countries not in Thailand/Taiwan scope
+        # Skip respondents from countries not in Thailand/Taiwan scope
         if valid_brands is None:
             add_issue(13, f"Respondent from {row.get('country')} not in project scope (Thailand/Taiwan only)", i)
             continue
 
-        qmake = str(row["quota_make"]).strip()
-        if qmake in {"nan", "none", "", "NaN"}:
-            add_issue(13, "Missing quota_make", i)
+        # normalize quota_make
+        try:
+            qmake = int(float(str(row["quota_make"]).strip()))
+        except:
+            add_issue(13, "Invalid quota_make", i)
             continue
 
-        # Loop through each brand column only once
+        # Loop through each brand column
         for c in cons_cols:
             m = re.search(r"_b(\d+)$", c)
             if not m:
@@ -373,7 +375,7 @@ if cons_cols and "quota_make" in df.columns and "country" in df.columns:
                 continue
 
             # If brand valid but not quota brand → must be blank
-            if str(bid) != qmake:
+            if bid != qmake:
                 add_issue(13, f"Non-quota brand {c} should be blank", i)
 
         # Ensure quota brand cell has a value
