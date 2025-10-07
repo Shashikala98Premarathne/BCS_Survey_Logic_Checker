@@ -456,10 +456,15 @@ if "truck_defects" in df.columns and "truck_defects_other_specify" in df.columns
     bad = (df["truck_defects"]==1)&df["truck_defects_other_specify"].isna()
     for i in df[bad].index: add_issue(19,"Missing OE for truck_defects=1",i)
 
-# Rule 20 – workshop_rating_14 should NOT exist (country-specific)
+# Rule 20 – workshop_rating_14 should NOT have any real values (country-specific)
 bad_workshop_cols = [c for c in df.columns if c.lower().startswith("workshop_rating_14")]
+
 for c in bad_workshop_cols:
-    add_issue(20, f"Column {c} should NOT exist (option 14 is country-specific)")
+    # Check if any cell in this column is NOT blank or "#NULL!"
+    non_null = df[c].apply(lambda v: not is_blank(v) and str(v).strip() != "#NULL!")
+    if non_null.any():
+        add_issue(20, f"Column {c} should NOT contain values (option 14 is country-specific)")
+
 
 # Rule 21 – Volvo comments
 if "quota_make" in df.columns and (df["quota_make"]==38).any():
