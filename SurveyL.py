@@ -466,12 +466,48 @@ for c in bad_workshop_cols:
         add_issue(20, f"Column {c} should NOT contain values (option 14 is country-specific)")
 
 
-# Rule 21 – Volvo comments
-if "quota_make" in df.columns and (df["quota_make"]==38).any():
-    for c in ["satisfaction_comments","dissatisfaction_comments"]:
-        if c not in df.columns:
-            for i in df[df["quota_make"]==38].index:
-                add_issue(21,f"Missing {c} for Volvo",i)
+# Rule 21 – Volvo comments (and dissatisfaction logic)
+if "quota_make" in df.columns and (df["quota_make"] == 38).any():
+    # --- Check presence of satisfaction_comments ---
+    if "satisfaction_comments" not in df.columns:
+        for i in df[df["quota_make"] == 38].index:
+            add_issue(21, "Missing satisfaction_comments for Volvo", i)
+
+    # --- Mapping between rating variables and dissatisfaction comment fields ---
+    dissat_map = {
+        "truck_rating_3": "dissatisfaction_comments_1",
+        "truck_rating_8": "dissatisfaction_comments_2",
+        "truck_rating_14": "dissatisfaction_comments_3",
+        "salesdelivery_rating_2": "dissatisfaction_comments_4",
+        "salesdelivery_rating_11": "dissatisfaction_comments_5",
+        "salesdelivery_rating_16": "dissatisfaction_comments_6",
+        "workshop_rating_7": "dissatisfaction_comments_7",
+        "workshop_rating_9": "dissatisfaction_comments_8",
+    }
+
+    for rating_var, comment_var in dissat_map.items():
+        # If rating column is missing, note it
+        if rating_var not in df.columns:
+            for i in df[df["quota_make"] == 38].index:
+                add_issue(21, f"Missing {rating_var} (needed for {comment_var})", i)
+            continue
+
+        # If dissatisfaction comment column missing
+        if comment_var not in df.columns:
+            for i in df[df["quota_make"] == 38].index:
+                add_issue(21, f"Missing {comment_var} column", i)
+            continue
+
+        # Check conditional requirement: rating 1–3 → comment should exist
+        bad_missing = (df["quota_make"] == 38) & df[rating_var].isin([1, 2, 3]) & df[comment_var].isna()
+        for i in df[bad_missing].index:
+            add_issue(21, f"{comment_var} required (because {rating_var} is between 1–3)", i)
+
+        # Check opposite: rating outside 1–3 → comment should be blank
+        bad_filled = (df["quota_make"] == 38) & (~df[rating_var].isin([1, 2, 3])) & df[comment_var].notna()
+        for i in df[bad_filled].index:
+            add_issue(21, f"{comment_var} should be blank (since {rating_var} not 1–3)", i)
+
 
 # Rule 22 23– Barriers: only if Volvo (38) NOT considered in B3.a
 consid_col = "consideration_b38"
