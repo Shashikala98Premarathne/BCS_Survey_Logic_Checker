@@ -272,7 +272,7 @@ VARIABLE_STRUCTURE = {
 }
 
 # -------------------------------------------------------------------
-# Rule 0 – Data Range Validation
+# Rule 0 – Data Range Validation  (ignore harmless dtype differences)
 # -------------------------------------------------------------------
 for prefix, rule in VARIABLE_STRUCTURE.items():
 
@@ -284,10 +284,23 @@ for prefix, rule in VARIABLE_STRUCTURE.items():
             col = f"{prefix}{suffix}"
             if col not in df.columns:
                 continue
+
+            # Convert to numeric if possible
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+            # Round floats very close to ints and cast to int for comparison
+            df[col] = df[col].apply(
+                lambda x: int(round(x)) if pd.notna(x) and float(x).is_integer() else x
+            )
+
+            # Validate only true numeric values
             invalid_mask = ~df[col].isin(allowed) & df[col].notna()
             for i in df[invalid_mask].index:
-                add_issue(0, f"{col} contains invalid value {df.loc[i,col]!r} (allowed: {sorted(allowed)})", i)
+                add_issue(
+                    0,
+                    f"{col} contains invalid value {df.loc[i, col]!r} (allowed: {sorted(allowed)})",
+                    i,
+                )
 
     # ---- Two-level prefixes (image_<attr>_b<brand>) ----
     elif isinstance(rule, dict) and "attribute_range" in rule:
@@ -299,10 +312,19 @@ for prefix, rule in VARIABLE_STRUCTURE.items():
                 col = f"{prefix}{a}_b{b}"
                 if col not in df.columns:
                     continue
+
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+                df[col] = df[col].apply(
+                    lambda x: int(round(x)) if pd.notna(x) and float(x).is_integer() else x
+                )
+
                 invalid_mask = ~df[col].isin(allowed) & df[col].notna()
                 for i in df[invalid_mask].index:
-                    add_issue(0, f"{col} contains invalid value {df.loc[i,col]!r} (allowed: {sorted(allowed)})", i)
+                    add_issue(
+                        0,
+                        f"{col} contains invalid value {df.loc[i, col]!r} (allowed: {sorted(allowed)})",
+                        i,
+                    )
 
     # ---- Single-variable columns ----
     elif isinstance(rule, list):
@@ -310,10 +332,20 @@ for prefix, rule in VARIABLE_STRUCTURE.items():
         col = prefix
         if col not in df.columns:
             continue
+
         df[col] = pd.to_numeric(df[col], errors="coerce")
+        df[col] = df[col].apply(
+            lambda x: int(round(x)) if pd.notna(x) and float(x).is_integer() else x
+        )
+
         invalid_mask = ~df[col].isin(allowed) & df[col].notna()
         for i in df[invalid_mask].index:
-            add_issue(0, f"{col} contains invalid value {df.loc[i,col]!r} (allowed: {sorted(allowed)})", i)
+            add_issue(
+                0,
+                f"{col} contains invalid value {df.loc[i, col]!r} (allowed: {sorted(allowed)})",
+                i,
+            )
+
 # -------------------------------------------------------------------
 # Checks
 # -------------------------------------------------------------------
