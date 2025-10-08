@@ -219,11 +219,15 @@ VARIABLE_STRUCTURE = {
     },
     "last_purchase_b": {
         "suffix_range": [15,19,21,27,28,32,38,47,58,98],
-        "allowed_values": [0,1,99],
+        "allowed_values": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,99],
     },
     "last_workshop_visit_b": {
         "suffix_range": [15,19,21,27,28,32,38,47,58,98],
-        "allowed_values": [0,1,99],
+        "allowed_values": [0,1,2,3,4,5,6,7,8,9,10,99],
+    },
+    "last_workshop_visit_spareparts_b": {
+        "suffix_range": [15,19,21,27,28,32,38,47,58,98],
+        "allowed_values": [0,1,2,3,4,5,6,7,8,9,10,99],    
     },
     "overall_impression_b": {
         "suffix_range": [15,19,21,27,28,32,38,47,58,98],
