@@ -107,6 +107,7 @@ df.replace(
 # Rules list
 # -------------------------------------------------------------------
 SURVEY_RULES = {
+    0: "Out-of-range or invalid value detected",
     1:  "Decision_maker = 2 → terminate case",
     2:  "Fleet_knowledge = 2 → terminate case",
     3:  "Company_position = 98 → require company_position_other_specify",
@@ -188,6 +189,131 @@ def add_issue(rule_id, msg, idx=None):
     if idx is not None:
         detailed.append((idx, rule_id, msg))
 
+# -------------------------------------------------------------------
+# Data Range Validation (Global Variable Structure)
+# -------------------------------------------------------------------
+VARIABLE_STRUCTURE = {
+    "familiarity_b": {
+        "suffix_range": [15,19,21,27,28,32,38,47,58,98],
+        "allowed_values": [1,2,3,4,5],
+    },
+    "unaided_aware_b": {
+        "suffix_range": list(range(1,66)) + [98],
+        "allowed_values": [0,1],
+    },
+    "usage_b": {
+        "suffix_range": list(range(1,66)) + [98],
+        "allowed_values": [0,1],
+    },
+    "performance_b": {
+        "suffix_range": [15,19,21,27,28,32,38,47,58,98],
+        "allowed_values": list(range(1,11)),
+    },
+    "closeness_b": {
+        "suffix_range": [15,19,21,27,28,32,38,47,58,98],
+        "allowed_values": list(range(1,11)),
+    },
+    "consideration_b": {
+        "suffix_range": [15,19,21,27,28,32,38,47,58,98],
+        "allowed_values": [0,1],
+    },
+    "last_purchase_b": {
+        "suffix_range": [15,19,21,27,28,32,38,47,58,98],
+        "allowed_values": [0,1,99],
+    },
+    "last_workshop_visit_b": {
+        "suffix_range": [15,19,21,27,28,32,38,47,58,98],
+        "allowed_values": [0,1,99],
+    },
+    "overall_impression_b": {
+        "suffix_range": [15,19,21,27,28,32,38,47,58,98],
+        "allowed_values": [1,2,3,4,5],
+    },
+    "image_": {
+        "attribute_range": [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,32],
+        "brand_range": list(range(1,66)) + [98],
+        "allowed_values": [0,1],
+    },
+    "truck_rating_": {
+        "suffix_range": list(range(1,15)),
+        "allowed_values": [1,2,3,4,5,9],
+    },
+    "salesdelivery_rating_": {
+        "suffix_range": [1,2,3,4,5,6,7,8,9,10,11,12,13,14,16,17],
+        "allowed_values": [1,2,3,4,5,9],
+    },
+    "workshop_rating_": {
+        "suffix_range": list(range(1,14)),
+        "allowed_values": [1,2,3,4,5,9],
+    },
+    "reasons_not_consider_volvo_": {
+        "suffix_range": list(range(1,13)) + [98],
+        "allowed_values": [0,1],
+    },
+    "reasons_not_consider_mack_": {
+        "suffix_range": list(range(1,13)) + [98],
+        "allowed_values": [0,1],
+    },
+    # Single variables
+    "decision_maker": [1,2],
+    "fleet_knowledge": [1,2],
+    "truck_defects": [1,2],
+    "interview_method": [1,2,3],
+    "last_purchase_hdt": [1,2,3,4,5,6,7,8,9],
+    "sample_source": [1,2],
+    "segment": [1,2],
+    "anonymity": [1,2],
+    "company_position": [1,2,3,4,5,6,7,98],
+    "operation_range_volvo_hdt": [1,2,3],
+    "transport_type": [1,2,3,4,5,6,7,8,9,10,11,12,13,98],
+    "main_brand": [7,15,19,21,25,26,27,28,32,38,47,58],
+    "quota_make": [7,15,19,21,25,26,27,28,32,38,47,58],
+    "preference": [7,15,19,21,25,26,27,28,32,38,47,58,99],
+}
+
+# -------------------------------------------------------------------
+# Rule 0 – Data Range Validation
+# -------------------------------------------------------------------
+for prefix, rule in VARIABLE_STRUCTURE.items():
+
+    # ---- Normal one-level prefixes ----
+    if isinstance(rule, dict) and "suffix_range" in rule:
+        suffixes = rule["suffix_range"]
+        allowed = set(rule["allowed_values"])
+        for suffix in suffixes:
+            col = f"{prefix}{suffix}"
+            if col not in df.columns:
+                continue
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+            invalid_mask = ~df[col].isin(allowed) & df[col].notna()
+            for i in df[invalid_mask].index:
+                add_issue(0, f"{col} contains invalid value {df.loc[i,col]!r} (allowed: {sorted(allowed)})", i)
+
+    # ---- Two-level prefixes (image_<attr>_b<brand>) ----
+    elif isinstance(rule, dict) and "attribute_range" in rule:
+        attrs = rule["attribute_range"]
+        brands = rule["brand_range"]
+        allowed = set(rule["allowed_values"])
+        for a in attrs:
+            for b in brands:
+                col = f"{prefix}{a}_b{b}"
+                if col not in df.columns:
+                    continue
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+                invalid_mask = ~df[col].isin(allowed) & df[col].notna()
+                for i in df[invalid_mask].index:
+                    add_issue(0, f"{col} contains invalid value {df.loc[i,col]!r} (allowed: {sorted(allowed)})", i)
+
+    # ---- Single-variable columns ----
+    elif isinstance(rule, list):
+        allowed = set(rule)
+        col = prefix
+        if col not in df.columns:
+            continue
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+        invalid_mask = ~df[col].isin(allowed) & df[col].notna()
+        for i in df[invalid_mask].index:
+            add_issue(0, f"{col} contains invalid value {df.loc[i,col]!r} (allowed: {sorted(allowed)})", i)
 # -------------------------------------------------------------------
 # Checks
 # -------------------------------------------------------------------
